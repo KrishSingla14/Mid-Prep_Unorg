@@ -1,0 +1,80 @@
+df1.to_excel('Processed_order_data_final.xlsx', index=False)
+import pandas as pd
+
+processed_file = 'Processed_order_data.xlsx'  # Replace with your file path
+
+
+df2= pd.read_excel(processed_file)
+# Aggregate warehouse_id to one value per customer_id in df2 (take the first occurrence)
+df2_aggregated = df2.groupby('customer_id')['warehouse_id'].first().reset_index()
+
+# Merge the dataframes on 'customer_id' to preserve df1's row count
+merged_df = pd.merge(df1, df2_aggregated[['customer_id', 'warehouse_id']],
+                     on='customer_id', how='left')
+
+# Display the result
+print(merged_df)
+print("Merge complete.")
+merged_df.to_excel('merged_customer_orders_final.xlsx', index=False)
+print("Merge complete. Check 'merged_customer_orders.xlsx' for the result.")
+import pandas as pd
+import ast
+
+# Load the Excel file
+df = pd.read_excel('merged_customer_orders_final.xlsx')
+
+# Print the first few rows of the relevant column to diagnose
+print("First 5 rows of predicted_items_quantities:")
+print(df['predicted_items_quantities'].head().to_string())
+
+# Convert string representations of lists to actual lists if needed
+df['predicted_items_quantities'] = df['predicted_items_quantities'].apply(
+    lambda x: ast.literal_eval(x) if isinstance(x, str) else x
+)
+
+# Extract unique item names from predicted_items_quantities
+item_names = set()
+for items in df['predicted_items_quantities']:
+    if isinstance(items, list):
+        for item, _ in items:
+            item_names.add(item)
+item_names = sorted(list(item_names))  # 607 unique items
+if not item_names:
+    raise ValueError("No valid item names found in predicted_items_quantities. Check the data.")
+print(f"Found {len(item_names)} unique item names: {item_names[:5]}...")  # Print first 5 for verification
+
+item_encoding = {item: idx for idx, item in enumerate(item_names)}  # Label encode 0 to 606
+
+# Create a new DataFrame with warehouse_ids as index and item_names as columns
+warehouse_ids = sorted(df['warehouse_id'].unique())  # Should be [1, 2, 3, 4, 5, 6]
+if not warehouse_ids:
+    raise ValueError("No warehouse_ids found. Check the data.")
+print(f"Found warehouse_ids: {warehouse_ids}")
+result_df = pd.DataFrame(0, index=warehouse_ids, columns=item_names)
+
+# Function to sum quantities for a given row's predicted_items_quantities
+def sum_quantities(items):
+    if isinstance(items, list):
+        return sum(qty for _, qty in items)
+    return 0
+
+# Aggregate quantities by warehouse_id and item_name
+for idx, row in df.iterrows():
+    warehouse_id = row['warehouse_id']
+    items = row['predicted_items_quantities']
+    if isinstance(items, list):
+        for item, qty in items:
+            result_df.at[warehouse_id, item] += qty
+
+# Verify the DataFrame has columns before adding the label-encoded row
+if result_df.empty or result_df.columns.empty:
+    raise ValueError("Result DataFrame is empty or has no columns. Aggregation may have failed.")
+print("Aggregation completed. Sample of result_df:\n", result_df.head().to_string())
+
+# Add label encoded column numbers as a new row
+label_encoded_row = [item_encoding[item] for item in item_names]
+result_df.loc['label_encoded'] = label_encoded_row
+
+# Save the result to a new Excel file
+result_df.to_excel('label_encoded_warehouse_quantities.xlsx')
+print("Label encoding and aggregation complete. Check 'label_encoded_warehouse_quantities.xlsx' for the result.")
